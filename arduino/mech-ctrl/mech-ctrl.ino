@@ -22,6 +22,8 @@
 #define pinTurnLeft 4
 #define pinTurnRight 7
 
+const int pinPhotoResistor = A0;
+
 // Light modes
 // Number of light modes. For modulo division when cycling through the modes.
 const byte N_MODES = 4;
@@ -57,9 +59,6 @@ CRGB leds[NUM_LEDS];
 
 // Total duration of a single ON/OFF blink in milliseconds.
 const unsigned long turnSignalInterval = 1000L;
-// Elapsed time since switching a blinker on.
-unsigned long blinkerSwitchOnTime = 0L;
-bool lastBlinkerLightState = false;
 
 // Forward prototype declaration because of the default parameter.
 void updateLights(bool show = true);
@@ -69,6 +68,8 @@ byte globalBrightness = 255;
 
 // Controls light mode. Holding the button changes brightness.
 Button buttonLightMode = Button(pinLightMode, BUTTON_PULLDOWN, true, 50);
+Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLDOWN, true, 50);
+Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLDOWN, true, 50);
 
 void nextMode(Button &b)
 {
@@ -92,16 +93,35 @@ void activateBrightnessChangeMode(Button &b)
   b.clickHandler(activateModeChange);
 }
 
+void turnOffBlinker(Button &b)
+{
+  updateLights();
+}
+
+void readAmbientLight(Button &b)
+{
+  Serial.print("Light:");
+  Serial.println(analogRead(pinPhotoResistor));
+}
+
 void setup()
 {
   Serial.begin(9600);
   Serial.println("Arduino ON.");
 
-  // Setup button pins
-  pinMode(pinTurnLeft, INPUT);
-  pinMode(pinTurnRight, INPUT);
+  pinMode(pinPhotoResistor, INPUT); // Set pinPhotoResistor - A0 pin as an input (optional)
+
+  // Setup buttons
   buttonLightMode.clickHandler(nextMode);
   buttonLightMode.holdHandler(activateBrightnessChangeMode, 300);
+
+  //Make sure lights are reset when a blinker is turned off.
+  buttonBlinkerLeft.releaseHandler(turnOffBlinker);
+  buttonBlinkerRight.releaseHandler(turnOffBlinker);
+
+  // Temp solution
+  buttonBlinkerLeft.pressHandler(readAmbientLight);
+  buttonBlinkerRight.pressHandler(readAmbientLight);
 
   FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
 
@@ -125,32 +145,13 @@ void loop()
 
 void handleBlinkers()
 {
-  byte signal = 0;
-  if (digitalRead(pinTurnLeft) == HIGH)
+  if (buttonBlinkerLeft.isPressed())
   {
-    signal = LEFT;  }
-  else if (digitalRead(pinTurnRight) == HIGH)
-  {
-    signal = RIGHT;
+    blink(buttonBlinkerLeft.holdTime(), LEFT);
   }
-  else
+  else if (buttonBlinkerRight.isPressed())
   {
-    if (blinkerSwitchOnTime != 0)
-    {
-      // Reset to the state before blinker
-      updateLights();
-    }
-    blinkerSwitchOnTime = 0;
-  }
-
-  if (signal != 0)
-  {
-    if (blinkerSwitchOnTime == 0)
-    {
-      // Init timer after the first button press detection
-      blinkerSwitchOnTime = millis();
-    }
-    blink(signal);
+    blink(buttonBlinkerRight.holdTime(), RIGHT);
   }
 }
 
@@ -158,17 +159,16 @@ void handleBlinkers()
  * Returns true if we are in the first half of the blinker interval,
  * measured since the blinker was switched on.
  */
-bool getBlinkerLightState(unsigned long switchOnTime)
+bool getBlinkerLightState(unsigned int switchOnTime)
 {
-  unsigned long elapsed = (millis() - switchOnTime);
   // Less than half the blinker interval elapsed?
-  return (elapsed % turnSignalInterval < (turnSignalInterval / 2));
+  return (switchOnTime % turnSignalInterval < (turnSignalInterval / 2));
 }
 
-void blink(byte side)
+void blink(unsigned int blinkerOnTime, byte side)
 {
   //Is the blinker light on or off at the moment?
-  bool blinkerState = getBlinkerLightState(blinkerSwitchOnTime);
+  bool blinkerState = getBlinkerLightState(blinkerOnTime);
 
   if (!blinkerState)
   {
@@ -188,8 +188,6 @@ void blink(byte side)
     rearLeft(blinkerColor);
   }
   FastLED.show();
-
-  lastBlinkerLightState = blinkerState;
 }
 
 void updateLights(bool show)
@@ -265,8 +263,10 @@ void day()
 */
 void night()
 {
-  fill_solid(leds, REAR_LEDS_START, CHSV(0, 0, 15));
-  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, 15));
+  //TODO Experimental ambient light controlled brightness. Does not update when ambient light changes. 
+  byte sideBrightness = analogRead(pinPhotoResistor) >> 3; // 1/8 * 1024
+  fill_solid(leds, REAR_LEDS_START, CHSV(0, 0, sideBrightness));
+  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, sideBrightness));
   frontalArea();
 }
 
