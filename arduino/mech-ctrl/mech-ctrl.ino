@@ -1,4 +1,5 @@
 #include <FastLED.h>
+#include "Button.h"
 
 // Total number of LEDs in the strip
 #define NUM_LEDS 144
@@ -54,11 +55,6 @@ const byte rearLightB = (((NUM_LEDS - REAR_LEDS_START) + (N_FRONTAL << 1)) >> 1)
 // Memory for all LED values
 CRGB leds[NUM_LEDS];
 
-// current state of the button
-int buttonState1 = 0;
-// previous state of the button
-int lastButtonState1 = 0;
-
 // Total duration of a single ON/OFF blink in milliseconds.
 const unsigned long turnSignalInterval = 1000L;
 // Elapsed time since switching a blinker on.
@@ -68,15 +64,44 @@ bool lastBlinkerLightState = false;
 // Forward prototype declaration because of the default parameter.
 void updateLights(bool show = true);
 
+//Temporary variable to test brightness control.
+byte globalBrightness = 255;
+
+// Controls light mode. Holding the button changes brightness.
+Button buttonLightMode = Button(pinLightMode, BUTTON_PULLDOWN, true, 50);
+
+void nextMode(Button &b)
+{
+  lightMode++;
+  lightMode %= N_MODES;
+  Serial.print("Light mode: ");
+  Serial.println(lightMode);
+  updateLights();
+  activateModeChange();
+}
+
+void activateModeChange()
+{
+  buttonLightMode.clickHandler(nextMode);
+}
+
+void activateBrightnessChangeMode(Button &b)
+{
+  // Deactivate click handler to ignore the last click, triggered by button hold.
+  // This handler will reactivate the original light mode change click handler.
+  b.clickHandler(activateModeChange);
+}
+
 void setup()
 {
   Serial.begin(9600);
   Serial.println("Arduino ON.");
 
   // Setup button pins
-  pinMode(pinLightMode, INPUT);
   pinMode(pinTurnLeft, INPUT);
   pinMode(pinTurnRight, INPUT);
+  buttonLightMode.clickHandler(nextMode);
+  buttonLightMode.holdHandler(activateBrightnessChangeMode, 300);
 
   FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
 
@@ -85,27 +110,14 @@ void setup()
 
 void loop()
 {
-  // Detect a button press by checking for its state change
-  buttonState1 = digitalRead(pinLightMode);
-  if (buttonState1 != lastButtonState1)
-  {
-    if (buttonState1 == HIGH)
-    {
-      lightMode = (lastLightMode + 1) % N_MODES;
-    }
-    delay(50);
-  }
-  lastButtonState1 = buttonState1;
+  buttonLightMode.process();
 
-  // Update lights if the mode was changed, otherwise do nothing
-  if (lightMode != lastLightMode)
+  //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
+  if (buttonLightMode.heldFor(300) && buttonLightMode.holdTime() % 10 == 0)
   {
-    Serial.print("Light mode: ");
-    Serial.println(lightMode);
+    globalBrightness++;
+    Serial.println(globalBrightness);
     updateLights();
-    lastLightMode = lightMode;
-    // Add some stability
-    delay(200);
   }
 
   handleBlinkers();
@@ -116,11 +128,7 @@ void handleBlinkers()
   byte signal = 0;
   if (digitalRead(pinTurnLeft) == HIGH)
   {
-    signal = LEFT;
-    // blink(LEFT);
-    frontLeft(CHSV(32, 255, 255));
-    rearLeft(CHSV(32, 255, 255));
-  }
+    signal = LEFT;  }
   else if (digitalRead(pinTurnRight) == HIGH)
   {
     signal = RIGHT;
@@ -144,16 +152,6 @@ void handleBlinkers()
     }
     blink(signal);
   }
-}
-
-/**
- * Checks the timer whether the turn signal state is on or off.
- */
-bool isBlinkerLightOn()
-{
-  unsigned long elapsed = (millis() - blinkerSwitchOnTime) % turnSignalInterval;
-  // return (elapsed < (turnSignalInterval >> 1));
-  return true;
 }
 
 /**
@@ -249,8 +247,8 @@ void rearRight(const CHSV &col)
 void park()
 {
   off();
-  fill_solid(leds, REAR_LEDS_START, CHSV(32, 20, 8));
-  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, 12));
+  fill_solid(leds, REAR_LEDS_START, CHSV(32, 20, globalBrightness >> 1));
+  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, globalBrightness >> 1));
 }
 
 /**
