@@ -14,7 +14,7 @@ Cusomized bicycle RGB LED strip illumination controlled by Arduino UNO
 - __OFF:__ Vse 0%. Nejaka indikace?
 - __Auto:__
   - Stred: 100%
-  - Strany: Podle senzoru. Viz tabulka niz.
+  - Strany: Podle senzoru. Viz tabulka niz. Moznost menit citlivost stejne jako nastaveni jasu, tj. drzenim prepinace rezimu. Melo by stacit posouvat hranici sero/svetlo, kdy se strany vypinaji.
 - __Manual:__
   - Vse podle hodnoty nastavene drzenim prepinace rezimu: 0-100%
   - 0-50%
