@@ -1,6 +1,0 @@
-{
-    "port": "COM3",
-    "board": "arduino:avr:uno",
-    "programmer": "AVRISP mkII",
-    "sketch": "mech-ctrl\\mech-ctrl.ino"
-}
