@@ -5,6 +5,7 @@ class Animator
 {
 private:
     unsigned long anim_start;
+
 public:
     Animator(int interval);
     ~Animator();

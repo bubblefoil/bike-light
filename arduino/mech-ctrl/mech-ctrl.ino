@@ -2,24 +2,20 @@
 #include "Button.h"
 
 // Total number of LEDs in the strip
-#define NUM_LEDS 144
-// Index of the first LED of the tail light
-#define REAR_LEDS_START 72
-#define LEDS_FL 0
-#define LEDS_FR 36
-#define LEDS_BL 72
-#define LEDS_BR 108
-// Controls the LED strip
-#define DATA_PIN 6
+#define NUM_LEDS 36
+// Control the LED strips
+#define DATA_PIN_FL 3
+#define DATA_PIN_FR 4
+#define DATA_PIN_BL 5
+#define DATA_PIN_BR 6
 
-//Blinker light hue in the range from 0 - red to 255 - red again
-#define BLINKER_HUE 24
-
+// TBD - Bluetooth communication
 #define RX 11
 #define TX 10
+
 // Digital input pins for buttons
-#define pinLightMode 2
-#define pinTurnLeft 4
+#define pinLightMode 8
+#define pinTurnLeft 9
 #define pinTurnRight 7
 
 const int pinPhotoResistor = A0;
@@ -32,6 +28,7 @@ const byte DAY = 1;
 const byte NIGHT = 2;
 const byte PARK = 3;
 
+// TODO Make this as an abstract class with updateLights method and brightness attribute.
 byte lightMode = OFF;
 byte lastLightMode = OFF;
 
@@ -39,26 +36,21 @@ byte lastLightMode = OFF;
 const byte LEFT = 11;
 //Right blinker
 const byte RIGHT = 12;
+//Blinker light hue in the range from 0 - red to 255 - red again
+const byte BLINKER_HUE = 24;
+// Total duration of a single ON/OFF blink in milliseconds.
+const unsigned long turnSignalInterval = 1000L;
 
 // Number of head/tail light LEDs. These shine at full brightness.
 const byte N_FRONTAL = 6;
 // Number of turn signal LEDs
 const byte N_TURN_SIG = 12;
 
-// Ranges of the head/tail lights
-// Find the symetrical range of N_FRONTAL LEDs within the front part of the strip. N_FRONTAL to each side from the center.
-// Calculated in the full front range and divided by bitshift in the end.
-const byte frontLightA = (REAR_LEDS_START - (N_FRONTAL << 1)) >> 1;
-const byte frontLightB = (REAR_LEDS_START + (N_FRONTAL << 1)) >> 1;
-// The same calculation as above, only shifted to the start of the strip and back to the rear part in the end.
-const byte rearLightA = (((NUM_LEDS - REAR_LEDS_START) - (N_FRONTAL << 1)) >> 1) + REAR_LEDS_START;
-const byte rearLightB = (((NUM_LEDS - REAR_LEDS_START) + (N_FRONTAL << 1)) >> 1) + REAR_LEDS_START;
-
 // Memory for all LED values
-CRGB leds[NUM_LEDS];
-
-// Total duration of a single ON/OFF blink in milliseconds.
-const unsigned long turnSignalInterval = 1000L;
+CRGB ledsFL[NUM_LEDS];
+CRGB ledsFR[NUM_LEDS];
+CRGB ledsBL[NUM_LEDS];
+CRGB ledsBR[NUM_LEDS];
 
 // Forward prototype declaration because of the default parameter.
 void updateLights(bool show = true);
@@ -78,19 +70,19 @@ void nextMode(Button &b)
   Serial.print("Light mode: ");
   Serial.println(lightMode);
   updateLights();
-  activateModeChange();
+  activateModeChange(buttonLightMode);
 }
 
-void activateModeChange()
+void activateModeChange(Button &b)
 {
-  buttonLightMode.clickHandler(nextMode);
+  b.releaseHandler(nextMode);
 }
 
 void activateBrightnessChangeMode(Button &b)
 {
   // Deactivate click handler to ignore the last click, triggered by button hold.
   // This handler will reactivate the original light mode change click handler.
-  b.clickHandler(activateModeChange);
+  b.releaseHandler(activateModeChange);
 }
 
 void turnOffBlinker(Button &b)
@@ -112,18 +104,22 @@ void setup()
   pinMode(pinPhotoResistor, INPUT); // Set pinPhotoResistor - A0 pin as an input (optional)
 
   // Setup buttons
-  buttonLightMode.clickHandler(nextMode);
+  buttonLightMode.releaseHandler(nextMode);
   buttonLightMode.holdHandler(activateBrightnessChangeMode, 300);
+  //TODO try reactivating mode change on release. Modify the lib to keep firing hold events. Use this handler to change brightness.
 
   //Make sure lights are reset when a blinker is turned off.
   buttonBlinkerLeft.releaseHandler(turnOffBlinker);
   buttonBlinkerRight.releaseHandler(turnOffBlinker);
 
-  // Temp solution
+  // Temp ambient light sensor test
   buttonBlinkerLeft.pressHandler(readAmbientLight);
   buttonBlinkerRight.pressHandler(readAmbientLight);
 
-  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+  FastLED.addLeds<NEOPIXEL, DATA_PIN_FL>(ledsFL, NUM_LEDS);
+  FastLED.addLeds<NEOPIXEL, DATA_PIN_FR>(ledsFR, NUM_LEDS);
+  FastLED.addLeds<NEOPIXEL, DATA_PIN_BL>(ledsBL, NUM_LEDS);
+  FastLED.addLeds<NEOPIXEL, DATA_PIN_BR>(ledsBR, NUM_LEDS);
 
   updateLights();
 }
@@ -135,12 +131,14 @@ void loop()
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
   if (buttonLightMode.heldFor(300) && buttonLightMode.holdTime() % 10 == 0)
   {
+
     globalBrightness++;
     Serial.println(globalBrightness);
     updateLights();
   }
 
   handleBlinkers();
+  FastLED.show();
 }
 
 void handleBlinkers()
@@ -187,7 +185,6 @@ void blink(unsigned int blinkerOnTime, byte side)
     frontLeft(blinkerColor);
     rearLeft(blinkerColor);
   }
-  FastLED.show();
 }
 
 void updateLights(bool show)
@@ -221,22 +218,22 @@ void off()
 
 void frontLeft(const CHSV &col)
 {
-  fill_solid(leds, LEDS_FR, col);
+  fill_solid(ledsFL, NUM_LEDS, col);
 }
 
 void frontRight(const CHSV &col)
-{
-  fill_solid(&leds[LEDS_FR], REAR_LEDS_START - LEDS_FR, col);
+{ 
+  fill_solid(ledsFR, NUM_LEDS, col);
 }
 
 void rearLeft(const CHSV &col)
 {
-  fill_solid(&leds[LEDS_BL], LEDS_BR - LEDS_BL, col);
+  fill_solid(ledsBL, NUM_LEDS, col);
 }
 
 void rearRight(const CHSV &col)
 {
-  fill_solid(&leds[LEDS_BR], NUM_LEDS - LEDS_BR, col);
+  fill_solid(ledsBR, NUM_LEDS, col);
 }
 
 /**
@@ -245,8 +242,10 @@ void rearRight(const CHSV &col)
 void park()
 {
   off();
-  fill_solid(leds, REAR_LEDS_START, CHSV(32, 20, globalBrightness >> 1));
-  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, globalBrightness >> 1));
+  frontLeft(CHSV(32, 20, globalBrightness >> 1));
+  frontRight(CHSV(32, 20, globalBrightness >> 1));
+  rearLeft(CHSV(0, 255, globalBrightness >> 1));
+  rearRight(CHSV(0, 255, globalBrightness >> 1));
 }
 
 /**
@@ -263,10 +262,12 @@ void day()
 */
 void night()
 {
-  //TODO Experimental ambient light controlled brightness. Does not update when ambient light changes. 
+  //TODO Experimental ambient light controlled brightness. Does not update when ambient light changes.
   byte sideBrightness = analogRead(pinPhotoResistor) >> 3; // 1/8 * 1024
-  fill_solid(leds, REAR_LEDS_START, CHSV(0, 0, sideBrightness));
-  fill_solid(&leds[REAR_LEDS_START], NUM_LEDS - REAR_LEDS_START, CHSV(0, 255, sideBrightness));
+  frontLeft(CHSV(0, 0, sideBrightness));
+  frontRight(CHSV(0, 0, sideBrightness));
+  rearLeft(CHSV(0, 255, sideBrightness));
+  rearRight(CHSV(0, 255, sideBrightness));
   frontalArea();
 }
 
@@ -275,12 +276,8 @@ void night()
 */
 void frontalArea()
 {
-  for (int led = frontLightA; led < frontLightB; led++)
-  {
-    leds[led] = CRGB::White;
-  }
-  for (int led = rearLightA; led < rearLightB; led++)
-  {
-    leds[led] = CRGB::Red;
-  }
+  fill_solid(&ledsFL[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::White);
+  fill_solid(&ledsFR[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::White);
+  fill_solid(&ledsBL[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::Red);
+  fill_solid(&ledsBR[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::Red);
 }
