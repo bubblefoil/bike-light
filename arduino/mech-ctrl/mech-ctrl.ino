@@ -1,13 +1,14 @@
 #include <FastLED.h>
 #include "Button.h"
+#include "Light.h"
 
 // Total number of LEDs in the strip
 #define NUM_LEDS 36
 // Control the LED strips
-#define DATA_PIN_FL 3
-#define DATA_PIN_FR 4
+#define DATA_PIN_FL 2
+#define DATA_PIN_FR 3
 #define DATA_PIN_BL 5
-#define DATA_PIN_BR 6
+#define DATA_PIN_BR 4
 
 // TBD - Bluetooth communication
 #define RX 11
@@ -42,7 +43,7 @@ const byte BLINKER_HUE = 24;
 const unsigned long turnSignalInterval = 1000L;
 
 // Number of head/tail light LEDs. These shine at full brightness.
-const byte N_FRONTAL = 6;
+const int N_FRONTAL = 6;
 // Number of turn signal LEDs
 const byte N_TURN_SIG = 12;
 
@@ -51,6 +52,27 @@ CRGB ledsFL[NUM_LEDS];
 CRGB ledsFR[NUM_LEDS];
 CRGB ledsBL[NUM_LEDS];
 CRGB ledsBR[NUM_LEDS];
+
+//LED arrays
+Lights lights = Lights(ledsFL, ledsFR, ledsBL, ledsBR, NUM_LEDS, NUM_LEDS, NUM_LEDS, NUM_LEDS);
+
+//Individual light modes.
+LightsOff lightsOff = LightsOff(lights);
+AdaptiveToAmbientLight adaptiveToAmbientLight = AdaptiveToAmbientLight(lights, pinPhotoResistor, N_FRONTAL);
+ManualBrightnessLight manualBrightnessLight = ManualBrightnessLight(lights, N_FRONTAL);
+ParkingLights parkingLights = ParkingLights(lights);
+
+/** Array of pointers to the light modes. Cycled through when switching modes.
+* These have to be pointers, otherwise modes would be stored and used by value, but through a LightMode referece,
+* which causes "object slicing" and caling the base method instead of derived.
+* https://stackoverflow.com/questions/274626/what-is-object-slicing
+*/
+LightMode *lightModes[] = {
+    &lightsOff,
+    &adaptiveToAmbientLight,
+    &manualBrightnessLight,
+    &parkingLights,
+};
 
 // Forward prototype declaration because of the default parameter.
 void updateLights(bool show = true);
@@ -131,12 +153,11 @@ void loop()
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
   if (buttonLightMode.heldFor(300) && buttonLightMode.holdTime() % 10 == 0)
   {
-
     globalBrightness++;
     Serial.println(globalBrightness);
-    updateLights();
   }
 
+  updateLights();
   handleBlinkers();
   FastLED.show();
 }
@@ -189,22 +210,9 @@ void blink(unsigned int blinkerOnTime, byte side)
 
 void updateLights(bool show)
 {
-  switch (lightMode)
-  {
-  case DAY:
-    day();
-    break;
-  case NIGHT:
-    night();
-    break;
-  case PARK:
-    park();
-    break;
-  case OFF:
-  default:
-    off();
-    break;
-  }
+  LightMode *mode = lightModes[lightMode];
+  mode->updateLights();
+
   if (show)
   {
     FastLED.show();
@@ -222,7 +230,7 @@ void frontLeft(const CHSV &col)
 }
 
 void frontRight(const CHSV &col)
-{ 
+{
   fill_solid(ledsFR, NUM_LEDS, col);
 }
 
@@ -234,41 +242,6 @@ void rearLeft(const CHSV &col)
 void rearRight(const CHSV &col)
 {
   fill_solid(ledsBR, NUM_LEDS, col);
-}
-
-/**
- * Activates parking lights mode. Dim red/white lights all around.
-*/
-void park()
-{
-  off();
-  frontLeft(CHSV(32, 20, globalBrightness >> 1));
-  frontRight(CHSV(32, 20, globalBrightness >> 1));
-  rearLeft(CHSV(0, 255, globalBrightness >> 1));
-  rearRight(CHSV(0, 255, globalBrightness >> 1));
-}
-
-/**
- * Activates day light mode.
-*/
-void day()
-{
-  off(); //Reset the sides
-  frontalArea();
-}
-
-/**
- * Activates night light mode. Dim light on sides, full brightness on nose and tail.
-*/
-void night()
-{
-  //TODO Experimental ambient light controlled brightness. Does not update when ambient light changes.
-  byte sideBrightness = analogRead(pinPhotoResistor) >> 3; // 1/8 * 1024
-  frontLeft(CHSV(0, 0, sideBrightness));
-  frontRight(CHSV(0, 0, sideBrightness));
-  rearLeft(CHSV(0, 255, sideBrightness));
-  rearRight(CHSV(0, 255, sideBrightness));
-  frontalArea();
 }
 
 /**
