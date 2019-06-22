@@ -44,17 +44,19 @@ class LightMode
 {
 protected:
     Lights &_lights;
-    const unsigned int _minBrightness = 0;
-    const unsigned int _maxBrightness = 0xFFFF;
+    const int _minBrightness = 0;
+    const int _maxBrightness = 0x7FFF;
+    // 1/2048 of full range per ms
+    const int _brightnessChangRate = 12; 
     //Updated by the brightness button. Each mode may interpret this value as needed.
-    unsigned int _rawBrightness = 0x7FFF;
+    int _rawBrightness = 0x7FFF >> 1;
 
 public:
     LightMode(Lights &lights);
     ~LightMode();
     virtual void updateLights();
     //
-    virtual void brightnessChange(const unsigned int dt, const BrightnessChange change);
+    virtual void brightnessChange(const unsigned int dt, const BrightnessChange direction);
     void frontLeft(const CHSV &col, int startOffset = 0, int endOffset = 0);
     void frontRight(const CHSV &col, int startOffset = 0, int endOffset = 0);
     void rearLeft(const CHSV &col, int startOffset = 0, int endOffset = 0);

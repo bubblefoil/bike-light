@@ -9,9 +9,27 @@ LightMode::LightMode(Lights &lights) : _lights(lights)
 LightMode::~LightMode() {}
 
 void LightMode::updateLights() { Serial.println("Using LightMode base class!"); }
-void LightMode::brightnessChange(const unsigned int dt, const BrightnessChange change)
+void LightMode::brightnessChange(const unsigned int dt, const BrightnessChange direction)
 {
-    _rawBrightness += (dt * change);
+    int increment = (int)dt * _brightnessChangRate * direction;
+    if (increment > 0 && _rawBrightness > (_maxBrightness - increment))
+    {
+        _rawBrightness = _maxBrightness;
+    }
+    else if (increment < 0 && _rawBrightness < (_minBrightness - increment))
+    {
+        _rawBrightness = _minBrightness;
+    }
+    else
+    {
+        _rawBrightness += increment;
+    }
+    Serial.print("*+ ");
+    Serial.print(increment);
+    Serial.print(", *<> ");
+    Serial.print(direction);
+    Serial.print(", * ");
+    Serial.println(_rawBrightness);
 }
 
 void LightMode::frontLeft(const CHSV &col, int startOffset /*=0*/, int endOffset /*=0*/)
@@ -87,17 +105,18 @@ void ManualBrightnessLight::updateLights()
 {
     byte centralBrightness;
     byte sideBrightness;
-    unsigned int halfBrightness = (_maxBrightness - _minBrightness);
+    int halfBrightness = (_maxBrightness - _minBrightness) / 2;
     if (_rawBrightness < halfBrightness)
     {
-        centralBrightness = map(_rawBrightness, halfBrightness, _maxBrightness, 10, 255);
+        centralBrightness = map(_rawBrightness, _minBrightness, halfBrightness, 10, 255);
         sideBrightness = 0;
     }
     else
     {
         centralBrightness = 255;
-        sideBrightness = map(_rawBrightness, halfBrightness, _minBrightness, 10, 255);
+        sideBrightness = map(_rawBrightness, halfBrightness, _maxBrightness, 0, 255);
     }
+
     // Serial.print("Manual light: ");
     // Serial.print(centralBrightness);
     // Serial.print(",");
@@ -108,10 +127,10 @@ void ManualBrightnessLight::updateLights()
     rearLeft(CHSV(0, 255, sideBrightness), 0, _centralLeds);
     rearRight(CHSV(0, 255, sideBrightness), 0, _centralLeds);
 
-    frontLeft(CHSV(0, 0, centralBrightness),  _lights.flCnt - _centralLeds);
-    frontRight(CHSV(0, 0, centralBrightness),  _lights.frCnt - _centralLeds);
-    rearLeft(CHSV(0, 255, centralBrightness),  _lights.blCnt - _centralLeds);
-    rearRight(CHSV(0, 255, centralBrightness),  _lights.brCnt - _centralLeds);
+    frontLeft(CHSV(0, 0, centralBrightness), _lights.flCnt - _centralLeds);
+    frontRight(CHSV(0, 0, centralBrightness), _lights.frCnt - _centralLeds);
+    rearLeft(CHSV(0, 255, centralBrightness), _lights.blCnt - _centralLeds);
+    rearRight(CHSV(0, 255, centralBrightness), _lights.brCnt - _centralLeds);
 }
 
 ParkingLights::ParkingLights(Lights &lights) : LightMode(lights) {}

@@ -21,17 +21,19 @@
 
 const int pinPhotoResistor = A0;
 
-// Light modes
-// Number of light modes. For modulo division when cycling through the modes.
-const byte N_MODES = 4;
+// Default light mode
 const byte OFF = 0;
-const byte DAY = 1;
-const byte NIGHT = 2;
-const byte PARK = 3;
 
 // TODO Make this as an abstract class with updateLights method and brightness attribute.
 byte lightMode = OFF;
 byte lastLightMode = OFF;
+
+// Millis until button press is interpreted as holding.
+const unsigned int holdThresholdTime = 300;
+// Last mode button hold duration. Used to find time increment for gradual brightness change.
+unsigned int lastHoldTime = 0;
+// Sign of the brightness increment. Flipped every time the button is held and released. Do not use byte, it is unsigned!
+int brightnessChangeDirection = 1;
 
 //Left blinker
 const byte LEFT = 11;
@@ -85,26 +87,37 @@ Button buttonLightMode = Button(pinLightMode, BUTTON_PULLDOWN, true, 50);
 Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLDOWN, true, 50);
 Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLDOWN, true, 50);
 
-void nextMode(Button &b)
+void nextLightMode(Button &b)
 {
   lightMode++;
-  lightMode %= N_MODES;
+  lightMode %= (sizeof(lightModes) / sizeof(LightMode *));
   Serial.print("Light mode: ");
   Serial.println(lightMode);
   updateLights();
-  activateModeChange(buttonLightMode);
 }
 
-void activateModeChange(Button &b)
+/**
+ * Release button handler which is active during holding event.
+ * When the button is release after a hold event, the release hanlder is set back to its normal light mode change function.
+ * Also the brightness change direction is flipped so when the button is held again, it makes the opposite change of brightness.
+ */
+void activateLightModeChangeHandler(Button &b)
 {
-  b.releaseHandler(nextMode);
+  brightnessChangeDirection *= -1;
+  Serial.print("*^ ");
+  Serial.println(brightnessChangeDirection);
+  b.releaseHandler(nextLightMode);
 }
 
+/**
+ * When a hold event is triggered, this hold handler changes Button release handler not to change Light mode,
+ * because user is changing brightness. 
+ */
 void activateBrightnessChangeMode(Button &b)
 {
   // Deactivate click handler to ignore the last click, triggered by button hold.
   // This handler will reactivate the original light mode change click handler.
-  b.releaseHandler(activateModeChange);
+  b.releaseHandler(activateLightModeChangeHandler);
 }
 
 void turnOffBlinker(Button &b)
@@ -126,7 +139,7 @@ void setup()
   pinMode(pinPhotoResistor, INPUT); // Set pinPhotoResistor - A0 pin as an input (optional)
 
   // Setup buttons
-  buttonLightMode.releaseHandler(nextMode);
+  buttonLightMode.releaseHandler(nextLightMode);
   buttonLightMode.holdHandler(activateBrightnessChangeMode, 300);
   //TODO try reactivating mode change on release. Modify the lib to keep firing hold events. Use this handler to change brightness.
 
@@ -151,15 +164,21 @@ void loop()
   buttonLightMode.process();
 
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
-  if (buttonLightMode.heldFor(300) && buttonLightMode.holdTime() % 10 == 0)
+  unsigned int holdTime = buttonLightMode.holdTime();
+  if (buttonLightMode.heldFor(holdThresholdTime) && holdTime > lastHoldTime)
   {
-    globalBrightness++;
-    Serial.println(globalBrightness);
+    lightModes[lightMode]->brightnessChange(holdTime - lastHoldTime, brightnessChangeDirection);
+    lastHoldTime = holdTime;
+  }
+  else
+  {
+    lastHoldTime = holdThresholdTime;
   }
 
   updateLights();
   handleBlinkers();
   FastLED.show();
+  FastLED.delay(10);
 }
 
 void handleBlinkers()
