@@ -11,15 +11,16 @@
 #define DATA_PIN_BR 4
 
 // TBD - Bluetooth communication
-#define RX 11
-#define TX 10
+#define RX 6
+#define TX 7
 
 // Digital input pins for buttons
-#define pinLightMode 8
-#define pinTurnLeft 9
-#define pinTurnRight 7
+#define pinLightMode 11
+#define pinTurnLeft 10
+#define pinTurnRight 12
 
 const int pinPhotoResistor = A0;
+const int pinBatteryVoltage = A4;
 
 // Default light mode
 const byte OFF = 0;
@@ -175,7 +176,7 @@ void loop()
     lastHoldTime = holdThresholdTime;
   }
 
-  updateLights();
+  updateLights(false);
   handleBlinkers();
   FastLED.show();
   FastLED.delay(10);
