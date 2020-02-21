@@ -86,13 +86,21 @@ Button buttonLightMode = Button(pinLightMode, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLUP_INTERNAL, true, 50);
 
-void nextLightMode(Button &b)
+/**
+ * Changes light mode to the next one, in a circle.
+ */
+void nextLightMode()
 {
   lightMode++;
   lightMode %= (sizeof(lightModes) / sizeof(LightMode *));
   Serial.print("Light mode: ");
   Serial.println(lightMode);
   updateLights();
+}
+
+void nextLightModeHandler(Button &b)
+{
+  nextLightMode();
 }
 
 /**
@@ -105,7 +113,7 @@ void activateLightModeChangeHandler(Button &b)
   brightnessChangeDirection *= -1;
   Serial.print("*^ ");
   Serial.println(brightnessChangeDirection);
-  b.releaseHandler(nextLightMode);
+  b.releaseHandler(nextLightModeHandler);
 }
 
 /**
@@ -130,6 +138,42 @@ void readAmbientLight(Button &b)
   Serial.println(analogRead(pinPhotoResistor));
 }
 
+void processSerialInput()
+{
+  // FIXME: Serial input is busy when FastLED writes to strips.
+  // https://github.com/FastLED/FastLED/wiki/Interrupt-problems
+  while (Serial.available() > 0)
+  {
+    String receivedText = Serial.readString();
+    Serial.println(receivedText);
+    char state = receivedText[0];
+    if (state >= '0' && state < (sizeof(lightModes) / sizeof(LightMode *)))
+    {
+      lightMode = (byte)state;
+    }
+    else
+    {
+      switch (state)
+      {
+      case '+':
+        lightModes[lightMode]->brightnessChange(100, MORE);
+        break;
+      case '-':
+        lightModes[lightMode]->brightnessChange(100, LESS);
+        break;
+      case 'm':
+        nextLightMode();
+        break;
+      default:
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Initialization when Arduino is turned on.
+*/
 void setup()
 {
   Serial.begin(9600);
@@ -138,7 +182,7 @@ void setup()
   pinMode(pinPhotoResistor, INPUT); // Set pinPhotoResistor - A0 pin as an input (optional)
 
   // Setup buttons
-  buttonLightMode.releaseHandler(nextLightMode);
+  buttonLightMode.releaseHandler(nextLightModeHandler);
   buttonLightMode.holdHandler(activateBrightnessChangeMode, 300);
   //TODO try reactivating mode change on release. Modify the lib to keep firing hold events. Use this handler to change brightness.
 
@@ -158,9 +202,13 @@ void setup()
   updateLights();
 }
 
+/**
+ * Main Arduino's infinite loop.
+*/
 void loop()
 {
   buttonLightMode.process();
+  void processSerialInput();
 
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
   unsigned int holdTime = buttonLightMode.holdTime();
