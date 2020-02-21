@@ -1,5 +1,9 @@
-# Circuit wiring example
+# TODO List
 
-Note that the pinout does not exactly correspond to the code because it cannot be changed in the designer.
-
-![circuit.PNG](circuit.PNG)
+* Ligths off when blinking in every mode
+* Implement power saving mode - blinking
+* Switch to power saving mode on low battery voltage
+* Less bright blinkers in power saving mode
+* Fix Serial issue #2
+* Animate blinkers
+* Animate light changes
