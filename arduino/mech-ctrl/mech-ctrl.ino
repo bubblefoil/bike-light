@@ -22,12 +22,9 @@
 const int pinPhotoResistor = A0;
 const int pinBatteryVoltage = A4;
 
-// Default light mode
+// Default light mode. Set to OFF mainly for development with just USB power.
 const byte OFF = 0;
-
-// TODO Make this as an abstract class with updateLights method and brightness attribute.
 byte lightMode = OFF;
-byte lastLightMode = OFF;
 
 // Millis until button press is interpreted as holding.
 const unsigned int holdThresholdTime = 300;
@@ -59,7 +56,8 @@ CRGB ledsBR[NUM_LEDS];
 //LED arrays
 Lights lights = Lights(ledsFL, ledsFR, ledsBL, ledsBR, NUM_LEDS, NUM_LEDS, NUM_LEDS, NUM_LEDS);
 
-//Individual light modes.
+// Individual light modes.
+// Classes implement abstract class LightMode with updateLights and changeBrightness methods.
 LightsOff lightsOff = LightsOff(lights);
 AdaptiveToAmbientLight adaptiveToAmbientLight = AdaptiveToAmbientLight(lights, pinPhotoResistor, N_FRONTAL);
 ManualBrightnessLight manualBrightnessLight = ManualBrightnessLight(lights, N_FRONTAL);
@@ -84,9 +82,9 @@ void updateLights(bool show = true);
 byte globalBrightness = 255;
 
 // Controls light mode. Holding the button changes brightness.
-Button buttonLightMode = Button(pinLightMode, BUTTON_PULLDOWN, true, 50);
-Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLDOWN, true, 50);
-Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLDOWN, true, 50);
+Button buttonLightMode = Button(pinLightMode, BUTTON_PULLUP_INTERNAL, true, 50);
+Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLUP_INTERNAL, true, 50);
+Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLUP_INTERNAL, true, 50);
 
 void nextLightMode(Button &b)
 {
