@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <FastLED.h>
 #include "Button.h"
 #include "Light.h"
@@ -170,6 +171,14 @@ void processSerialInput()
     }
   }
 }
+
+void handleBlinkers();
+void blink(unsigned int blinkerOnTime, byte side);
+void frontLeft(const CHSV &col);
+void frontRight(const CHSV &col);
+void rearLeft(const CHSV &col);
+void rearRight(const CHSV &col);
+void frontalArea();
 
 /**
  * Initialization when Arduino is turned on.
