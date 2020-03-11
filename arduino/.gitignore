@@ -3,9 +3,3 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-/build
-
-# KiCad
-hardware/**/*.kicad_pcb-bak
-hardware/**/*.sch-bak
-hardware/**/*-cache*

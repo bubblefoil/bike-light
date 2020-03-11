@@ -46,7 +46,7 @@ protected:
     Lights &_lights;
     const int _minBrightness = 0;
     const int _maxBrightness = 0x7FFF;
-    // 1/2048 of full range per ms
+    // 1/2048 of full range per ms -> 0-100% in 2s
     const int _brightnessChangRate = 12; 
     //Updated by the brightness button. Each mode may interpret this value as needed.
     int _rawBrightness = 0x7FFF >> 1;
