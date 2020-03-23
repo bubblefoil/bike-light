@@ -9,3 +9,4 @@
 hardware/**/*.kicad_pcb-bak
 hardware/**/*.sch-bak
 hardware/**/*-cache*
+hardware/**/_autosave-*
