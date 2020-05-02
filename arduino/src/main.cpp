@@ -20,8 +20,13 @@
 #define pinTurnLeft 10
 #define pinTurnRight 12
 
-const int pinPhotoResistor = A0;
-const int pinBatteryVoltage = A4;
+const uint8_t pinPhotoResistor = A0;
+const uint8_t pinBatteryVoltage = A4;
+
+const float batteryVoltageDividerR1 = 98000;
+const float batteryVoltageDividerR2 = 22000;
+// Measure the actual voltage on the board's 5V pin
+const float boardReferenceVoltage = 5.0;
 
 // Default light mode. Set to OFF mainly for development with just USB power.
 const byte OFF = 0;
@@ -133,7 +138,7 @@ void turnOffBlinker(Button &b)
   updateLights();
 }
 
-void readAmbientLight(Button &b)
+void printAmbientLightLevel(Button &b)
 {
   Serial.print("Light:");
   Serial.println(analogRead(pinPhotoResistor));
@@ -173,6 +178,7 @@ void processSerialInput()
 }
 
 void handleBlinkers();
+float readBatteryVoltage();
 void blink(unsigned int blinkerOnTime, byte side);
 void frontLeft(const CHSV &col);
 void frontRight(const CHSV &col);
@@ -200,8 +206,8 @@ void setup()
   buttonBlinkerRight.releaseHandler(turnOffBlinker);
 
   // Temp ambient light sensor test
-  buttonBlinkerLeft.pressHandler(readAmbientLight);
-  buttonBlinkerRight.pressHandler(readAmbientLight);
+  buttonBlinkerLeft.pressHandler(printAmbientLightLevel);
+  buttonBlinkerRight.pressHandler(printAmbientLightLevel);
 
   FastLED.addLeds<NEOPIXEL, DATA_PIN_FL>(ledsFL, NUM_LEDS);
   FastLED.addLeds<NEOPIXEL, DATA_PIN_FR>(ledsFR, NUM_LEDS);
@@ -328,4 +334,13 @@ void frontalArea()
   fill_solid(&ledsFR[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::White);
   fill_solid(&ledsBL[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::Red);
   fill_solid(&ledsBR[NUM_LEDS - N_FRONTAL], N_FRONTAL, CRGB::Red);
+}
+
+float readBatteryVoltage()
+{
+  //TODO Take more samples and drop the first one. Return AVG.
+  int inputValue = analogRead(pinBatteryVoltage);
+  float pinInputVolts = (inputValue * boardReferenceVoltage) / 1024.0;
+  float batteryVolts = pinInputVolts / (batteryVoltageDividerR2 / (batteryVoltageDividerR1 + batteryVoltageDividerR2));
+  return batteryVolts;
 }
