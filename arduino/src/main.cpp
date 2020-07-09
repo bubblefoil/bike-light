@@ -3,13 +3,25 @@
 #include "Button.h"
 #include "Light.h"
 
+#define PRINT_DEBUG 1
+
+#if PRINT_DEBUG
+#define PRINTS(s)   { Serial.print(F(s)); }
+#define PRINT(s,v)  { Serial.print(F(s)); Serial.print(v); }
+#define PRINTX(s,x) { Serial.print(F(s)); Serial.print(v, HEX); }
+#else
+#define PRINTS(s)
+#define PRINT(s,v)
+#define PRINTX(s,x)
+#endif
+
 // Total number of LEDs in the strip
 #define NUM_LEDS 36
 // Control the LED strips
-#define DATA_PIN_FL 2
-#define DATA_PIN_FR 3
-#define DATA_PIN_BL 5
-#define DATA_PIN_BR 4
+#define DATA_PIN_BR 2
+#define DATA_PIN_BL 3
+#define DATA_PIN_FL 4
+#define DATA_PIN_FR 5
 
 // TBD - Bluetooth communication
 #define RX 6
@@ -23,6 +35,10 @@
 const uint8_t pinPhotoResistor = A0;
 const uint8_t pinBatteryVoltage = A4;
 
+// Measure the actual resistance of divider resistors.
+// Note: If there is a chance of voltage on the analog pin when Arduino is not powered,
+// make sure R1 is large enough that current into the pin is < 10 µA and there is a 100 nF capacitor which charges Arduino's internal capacitor fast enough during sampling.
+// Otherwise, go with R1 ~ 10k
 const float batteryVoltageDividerR1 = 98000;
 const float batteryVoltageDividerR2 = 22000;
 // Measure the actual voltage on the board's 5V pin
@@ -150,9 +166,10 @@ void processSerialInput()
   // https://github.com/FastLED/FastLED/wiki/Interrupt-problems
   while (Serial.available() > 0)
   {
-    String receivedText = Serial.readString();
+    int receivedText = Serial.read();
     Serial.println(receivedText);
-    char state = receivedText[0];
+    char state = receivedText;
+    // FIXME: Convert to byte before comparing to number of light modes
     if (state >= '0' && state < (sizeof(lightModes) / sizeof(LightMode *)))
     {
       lightMode = (byte)state;
