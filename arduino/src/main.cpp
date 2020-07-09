@@ -6,13 +6,24 @@
 #define PRINT_DEBUG 1
 
 #if PRINT_DEBUG
-#define PRINTS(s)   { Serial.print(F(s)); }
-#define PRINT(s,v)  { Serial.print(F(s)); Serial.print(v); }
-#define PRINTX(s,x) { Serial.print(F(s)); Serial.print(v, HEX); }
+#define PRINTS(s)       \
+  {                     \
+    Serial.print(F(s)); \
+  }
+#define PRINT(s, v)     \
+  {                     \
+    Serial.print(F(s)); \
+    Serial.print(v);    \
+  }
+#define PRINTX(s, x)      \
+  {                       \
+    Serial.print(F(s));   \
+    Serial.print(v, HEX); \
+  }
 #else
 #define PRINTS(s)
-#define PRINT(s,v)
-#define PRINTX(s,x)
+#define PRINT(s, v)
+#define PRINTX(s, x)
 #endif
 
 // Total number of LEDs in the strip
@@ -32,6 +43,11 @@
 #define pinTurnLeft 10
 #define pinTurnRight 12
 
+// Size of battery voltage smoothing buffer
+#define BAT_SAMPLES 16
+// Period in millis between taking battery voltage samples
+#define BAT_SAMPLE_INTRVAL 255
+
 const uint8_t pinPhotoResistor = A0;
 const uint8_t pinBatteryVoltage = A4;
 
@@ -39,10 +55,16 @@ const uint8_t pinBatteryVoltage = A4;
 // Note: If there is a chance of voltage on the analog pin when Arduino is not powered,
 // make sure R1 is large enough that current into the pin is < 10 µA and there is a 100 nF capacitor which charges Arduino's internal capacitor fast enough during sampling.
 // Otherwise, go with R1 ~ 10k
-const float batteryVoltageDividerR1 = 98000;
-const float batteryVoltageDividerR2 = 22000;
+const float batteryVoltageDividerR1 = 10000000;
+const float batteryVoltageDividerR2 = 2000000;
 // Measure the actual voltage on the board's 5V pin
 const float boardReferenceVoltage = 5.0;
+const float batteryVoltageNominal = 12.0;
+const float batteryVoltageCritical = 9.0;
+
+// Size of battery voltage smoothing buffer
+float batteryVoltageSamples[BAT_SAMPLES];
+byte batteryVoltageReadingIndex = 0;
 
 // Default light mode. Set to OFF mainly for development with just USB power.
 const byte OFF = 0;
@@ -97,9 +119,6 @@ LightMode *lightModes[] = {
     &parkingLights,
 };
 
-// Forward prototype declaration because of the default parameter.
-void updateLights(bool show = true);
-
 //Temporary variable to test brightness control.
 byte globalBrightness = 255;
 
@@ -107,6 +126,29 @@ byte globalBrightness = 255;
 Button buttonLightMode = Button(pinLightMode, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLUP_INTERNAL, true, 50);
+
+
+// Forward prototype declaration because of the default parameter.
+void updateLights(bool show = true);
+
+// Reads raw analog value and calculates voltage from divider values
+float readBatteryVoltage();
+// Reads battery voltage and adds new sample to a circular buffer
+void takeBatteryVoltageSample();
+// Calculates avarage voltage from the buffer of samples
+float getSmoothedBatteryVoltage();
+// Fills buffer with voltage samples
+void initBatteryVoltageStatus();
+// Currently just writes battery voltage to Serial. Planned to use LEDs as indicator.
+void indicateBatteryVoltageStatus(const float voltage);
+
+void handleBlinkers();
+void blink(unsigned int blinkerOnTime, byte side);
+void frontLeft(const CHSV &col);
+void frontRight(const CHSV &col);
+void rearLeft(const CHSV &col);
+void rearRight(const CHSV &col);
+void frontalArea();
 
 /**
  * Changes light mode to the next one, in a circle.
@@ -156,8 +198,12 @@ void turnOffBlinker(Button &b)
 
 void printAmbientLightLevel(Button &b)
 {
-  Serial.print("Light:");
-  Serial.println(analogRead(pinPhotoResistor));
+#if PRINT_DEBUG
+  Serial.print("Light: ");
+  Serial.print(analogRead(pinPhotoResistor));
+  Serial.println(" / 1023");
+  indicateBatteryVoltageStatus(getSmoothedBatteryVoltage());
+#endif
 }
 
 void processSerialInput()
@@ -170,9 +216,9 @@ void processSerialInput()
     Serial.println(receivedText);
     char state = receivedText;
     // FIXME: Convert to byte before comparing to number of light modes
-    if (state >= '0' && state < (sizeof(lightModes) / sizeof(LightMode *)))
+    if (state >= '0' && state <= '3')
     {
-      lightMode = (byte)state;
+      lightMode = (byte)(state - '0');
     }
     else
     {
@@ -193,15 +239,6 @@ void processSerialInput()
     }
   }
 }
-
-void handleBlinkers();
-float readBatteryVoltage();
-void blink(unsigned int blinkerOnTime, byte side);
-void frontLeft(const CHSV &col);
-void frontRight(const CHSV &col);
-void rearLeft(const CHSV &col);
-void rearRight(const CHSV &col);
-void frontalArea();
 
 /**
  * Initialization when Arduino is turned on.
@@ -231,6 +268,9 @@ void setup()
   FastLED.addLeds<NEOPIXEL, DATA_PIN_BL>(ledsBL, NUM_LEDS);
   FastLED.addLeds<NEOPIXEL, DATA_PIN_BR>(ledsBR, NUM_LEDS);
 
+  initBatteryVoltageStatus();
+  indicateBatteryVoltageStatus(getSmoothedBatteryVoltage());
+
   updateLights();
 }
 
@@ -241,6 +281,7 @@ void loop()
 {
   buttonLightMode.process();
   void processSerialInput();
+  void takeBatteryVoltageSample();
 
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
   unsigned int holdTime = buttonLightMode.holdTime();
@@ -360,4 +401,38 @@ float readBatteryVoltage()
   float pinInputVolts = (inputValue * boardReferenceVoltage) / 1024.0;
   float batteryVolts = pinInputVolts / (batteryVoltageDividerR2 / (batteryVoltageDividerR1 + batteryVoltageDividerR2));
   return batteryVolts;
+}
+
+void takeBatteryVoltageSample()
+{
+  batteryVoltageSamples[batteryVoltageReadingIndex] = readBatteryVoltage();
+  batteryVoltageReadingIndex = (batteryVoltageReadingIndex + 1) % BAT_SAMPLES;
+}
+
+void initBatteryVoltageStatus()
+{
+  readBatteryVoltage();
+  for (byte i = 0; i < BAT_SAMPLES; i++)
+  {
+    batteryVoltageSamples[i] = readBatteryVoltage();
+  }
+}
+
+float getSmoothedBatteryVoltage()
+{
+  takeBatteryVoltageSample();
+  float total = 0;
+  for (byte i = 0; i < BAT_SAMPLES; i++)
+  {
+    total += batteryVoltageSamples[i];
+  }
+  float voltage = total / BAT_SAMPLES;
+  return voltage;
+}
+
+void indicateBatteryVoltageStatus(const float voltage)
+{
+  Serial.print("Battery:");
+  Serial.print(voltage);
+  Serial.println("V");
 }
