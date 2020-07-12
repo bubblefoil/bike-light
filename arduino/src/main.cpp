@@ -4,6 +4,7 @@
 #include "Light.h"
 
 #define PRINT_DEBUG 1
+#define PRINT_TRACE 1
 
 #if PRINT_DEBUG
 #define PRINTS(s)       \
@@ -18,7 +19,7 @@
 #define PRINTX(s, x)      \
   {                       \
     Serial.print(F(s));   \
-    Serial.print(v, HEX); \
+    Serial.print(x, HEX); \
   }
 #else
 #define PRINTS(s)
@@ -77,24 +78,34 @@ unsigned int lastHoldTime = 0;
 // Sign of the brightness increment. Flipped every time the button is held and released. Do not use byte, it is unsigned!
 int brightnessChangeDirection = 1;
 
-//Left blinker
-const byte LEFT = 11;
-//Right blinker
-const byte RIGHT = 12;
-//Blinker light hue in the range from 0 - red to 255 - red again
+// Left blinker
+const byte LEFT = 1 << 0;
+// Right blinker
+const byte RIGHT = 1 << 1;
+// Blinker light hue in the range from 0 - red to 255 - red again. Orange should be 32 but it seemed too yellowish.
 const byte BLINKER_HUE = 24;
+// Blinker minimum light brightness in on the sides. Gradiently brighter towords center. Range 0 - 255, although below 30 the color looks horrible and below 25 it turns red.
+const byte BLINKER_DIM_BRIGHTNESS = 40;
 // Total duration of a single ON/OFF blink in milliseconds.
-const unsigned long turnSignalInterval = 1000L;
+const unsigned long BLINKER_INTERVAL = 1000L;
+// Hazard warning lights gesture period in milliseconds. If a blinker is turned on 3-times withing this period, lights switch to Harard warning light mode.
+const unsigned long HAZARD_LIGHTS_GESTURE_TIME = 800L;
+// Last timestamps of turning on blinker. Used to detect 3 quick changes which actvate warning lights.
+unsigned long blinkerTurnOnTimes[] = {-4 * HAZARD_LIGHTS_GESTURE_TIME, -2 * HAZARD_LIGHTS_GESTURE_TIME, -HAZARD_LIGHTS_GESTURE_TIME}; // Init to something that won't trigger the gesture right away.
 
 // Number of head/tail light LEDs. These shine at full brightness.
 const int N_FRONTAL = 6;
 // Number of turn signal LEDs
 const byte N_TURN_SIG = 12;
 
-// Memory for all LED values
+// Memory for all LED colors
+// Front left LED colors
 CRGB ledsFL[NUM_LEDS];
+// Front right LED colors
 CRGB ledsFR[NUM_LEDS];
+// Rear left LED colors
 CRGB ledsBL[NUM_LEDS];
+// Rear right LED colors
 CRGB ledsBR[NUM_LEDS];
 
 //LED arrays
@@ -127,7 +138,6 @@ Button buttonLightMode = Button(pinLightMode, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerLeft = Button(pinTurnLeft, BUTTON_PULLUP_INTERNAL, true, 50);
 Button buttonBlinkerRight = Button(pinTurnRight, BUTTON_PULLUP_INTERNAL, true, 50);
 
-
 // Forward prototype declaration because of the default parameter.
 void updateLights(bool show = true);
 
@@ -140,7 +150,7 @@ float getSmoothedBatteryVoltage();
 // Fills buffer with voltage samples
 void initBatteryVoltageStatus();
 // Currently just writes battery voltage to Serial. Planned to use LEDs as indicator.
-void indicateBatteryVoltageStatus(const float voltage);
+void indicateBatteryVoltageStatus(float voltage);
 
 void handleBlinkers();
 void blink(unsigned int blinkerOnTime, byte side);
@@ -196,7 +206,7 @@ void turnOffBlinker(Button &b)
   updateLights();
 }
 
-void printAmbientLightLevel(Button &b)
+void printAmbientLightLevel()
 {
 #if PRINT_DEBUG
   Serial.print("Light: ");
@@ -204,6 +214,28 @@ void printAmbientLightLevel(Button &b)
   Serial.println(" / 1023");
   indicateBatteryVoltageStatus(getSmoothedBatteryVoltage());
 #endif
+}
+
+void blinkerPressed(Button &b)
+{
+  // Write down the time of this blinker button press
+  blinkerTurnOnTimes[0] = blinkerTurnOnTimes[1];
+  blinkerTurnOnTimes[1] = blinkerTurnOnTimes[2];
+  blinkerTurnOnTimes[2] = millis();
+
+#if PRINT_TRACE
+  Serial.print("blinker press times:");
+  Serial.print(blinkerTurnOnTimes[0]);
+  Serial.print("ms, ");
+  Serial.print(blinkerTurnOnTimes[1]);
+  Serial.print("ms, ");
+  Serial.print(blinkerTurnOnTimes[2]);
+  Serial.print("ms, time=");
+  Serial.print(blinkerTurnOnTimes[2] - blinkerTurnOnTimes[0]);
+  Serial.println("ms");
+#endif
+
+  printAmbientLightLevel();
 }
 
 void processSerialInput()
@@ -260,8 +292,8 @@ void setup()
   buttonBlinkerRight.releaseHandler(turnOffBlinker);
 
   // Temp ambient light sensor test
-  buttonBlinkerLeft.pressHandler(printAmbientLightLevel);
-  buttonBlinkerRight.pressHandler(printAmbientLightLevel);
+  buttonBlinkerLeft.pressHandler(blinkerPressed);
+  buttonBlinkerRight.pressHandler(blinkerPressed);
 
   FastLED.addLeds<NEOPIXEL, DATA_PIN_FL>(ledsFL, NUM_LEDS);
   FastLED.addLeds<NEOPIXEL, DATA_PIN_FR>(ledsFR, NUM_LEDS);
@@ -280,7 +312,7 @@ void setup()
 void loop()
 {
   buttonLightMode.process();
-  void processSerialInput();
+  // void processSerialInput();
   void takeBatteryVoltageSample();
 
   //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
@@ -303,13 +335,18 @@ void loop()
 
 void handleBlinkers()
 {
+  // Check if hazard warning lights should be activated by gesture
+  unsigned long lastGestureTime = blinkerTurnOnTimes[2] - blinkerTurnOnTimes[0];
+  byte hazard = (lastGestureTime <= HAZARD_LIGHTS_GESTURE_TIME) ? LEFT | RIGHT : 0;
+
   if (buttonBlinkerLeft.isPressed())
   {
-    blink(buttonBlinkerLeft.holdTime(), LEFT);
+    blink(buttonBlinkerLeft.holdTime(), LEFT | hazard);
   }
-  else if (buttonBlinkerRight.isPressed())
+  // Not else if to enable using HW which can activate hazard lights by pressing both blinker buttons.
+  if (buttonBlinkerRight.isPressed())
   {
-    blink(buttonBlinkerRight.holdTime(), RIGHT);
+    blink(buttonBlinkerRight.holdTime(), RIGHT | hazard);
   }
 }
 
@@ -320,7 +357,7 @@ void handleBlinkers()
 bool getBlinkerLightState(unsigned int switchOnTime)
 {
   // Less than half the blinker interval elapsed?
-  return (switchOnTime % turnSignalInterval < (turnSignalInterval / 2));
+  return (switchOnTime % BLINKER_INTERVAL < (BLINKER_INTERVAL / 2));
 }
 
 void blink(unsigned int blinkerOnTime, byte side)
@@ -334,19 +371,21 @@ void blink(unsigned int blinkerOnTime, byte side)
   }
 
   byte brightness = blinkerState ? 255 : 0;
-  CHSV blinkerColor = CHSV(BLINKER_HUE, 255, brightness);
-  if (side == RIGHT)
+  CHSV blinkerColorFull = CHSV(BLINKER_HUE, 255, brightness);
+  CHSV blinkerColorDim = CHSV(BLINKER_HUE, 255, brightness & BLINKER_DIM_BRIGHTNESS);
+  if (side & RIGHT)
   {
-    frontRight(blinkerColor);
-    rearRight(blinkerColor);
+    fill_gradient_RGB(ledsFR, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
+    fill_gradient_RGB(ledsBR, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
   }
-  else if (side == LEFT)
+  if (side & LEFT)
   {
-    frontLeft(blinkerColor);
-    rearLeft(blinkerColor);
+    fill_gradient_RGB(ledsFL, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
+    fill_gradient_RGB(ledsBL, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
   }
 }
 
+// Calls updateLights method of currently active light mode. If show=true, writes color values to LEDs.
 void updateLights(bool show)
 {
   LightMode *mode = lightModes[lightMode];
@@ -396,9 +435,14 @@ void frontalArea()
 
 float readBatteryVoltage()
 {
-  //TODO Take more samples and drop the first one. Return AVG.
-  int inputValue = analogRead(pinBatteryVoltage);
-  float pinInputVolts = (inputValue * boardReferenceVoltage) / 1024.0;
+  // Take more samples and drop the first one. Return AVG.
+  analogRead(pinBatteryVoltage);
+  int inputValue = 0;
+  for (byte i = 0; i < 16; i++)
+  {
+    inputValue += analogRead(pinBatteryVoltage);
+  }
+  float pinInputVolts = ((inputValue >> 4) * boardReferenceVoltage) / 1024.0;
   float batteryVolts = pinInputVolts / (batteryVoltageDividerR2 / (batteryVoltageDividerR1 + batteryVoltageDividerR2));
   return batteryVolts;
 }
@@ -420,17 +464,16 @@ void initBatteryVoltageStatus()
 
 float getSmoothedBatteryVoltage()
 {
-  takeBatteryVoltageSample();
   float total = 0;
   for (byte i = 0; i < BAT_SAMPLES; i++)
   {
     total += batteryVoltageSamples[i];
   }
-  float voltage = total / BAT_SAMPLES;
+  float voltage = total / (float) BAT_SAMPLES;
   return voltage;
 }
 
-void indicateBatteryVoltageStatus(const float voltage)
+void indicateBatteryVoltageStatus(float voltage)
 {
   Serial.print("Battery:");
   Serial.print(voltage);

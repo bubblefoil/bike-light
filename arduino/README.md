@@ -14,7 +14,8 @@ Application is developed with [PlatformIO](https://platformio.org/platformio-ide
 
 ## TODO List
 
-* Ligths off when blinking in every mode
+* ~~Ligths off when blinking in every mode~~
+* Turn signals should turn off sides completely in daylight
 * Implement power saving mode - blinking
 * Switch to power saving mode on low battery voltage
 * Less bright blinkers in power saving mode
