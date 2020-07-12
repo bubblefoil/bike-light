@@ -91,8 +91,7 @@ void AdaptiveToAmbientLight::updateLights()
     byte daylightThreshold = map(_rawBrightness, _minBrightness, _maxBrightness, DAYLIGHT_THRESHOLD_MIN, DAYLIGHT_THRESHOLD_MAX);
     byte sideBrightness = average >= daylightThreshold ? 0 : map(average, 0, 1023, AMBIENT_SIDE_BRIGHTNESS_MIN, AMBIENT_SIDE_BRIGHTNESS_MAX);
 
-#if PRINT_DEBUG
-    // debug print
+#if PRINT_TRACE
     unsigned long now = millis();
     if (now - lastLog > 1000)
     {
@@ -181,4 +180,34 @@ void ParkingLights::updateLights()
     frontRight(CHSV(0, 0, brightness));
     rearLeft(CHSV(0, 255, brightness));
     rearRight(CHSV(0, 255, brightness));
+}
+
+PowerSavingLight::PowerSavingLight(Lights &lights, unsigned int blinkOnMillis, unsigned int blinkOffMillis, int numberOfCentralLeds) : LightMode(lights),
+                                                                                                                       _blinkOnMillis(blinkOnMillis),
+                                                                                                                       _blinkOffMillis(blinkOffMillis),
+                                                                                                                       _centralLeds(numberOfCentralLeds)
+{
+}
+
+PowerSavingLight::~PowerSavingLight()
+{
+}
+
+void PowerSavingLight::updateLights()
+{
+    unsigned long t = (millis() - time) % (_blinkOnMillis + _blinkOffMillis);
+    byte brightness = t >= _blinkOnMillis ? (byte)map(_rawBrightness, _minBrightness, _maxBrightness, 1, 31) : 0;
+    CHSV colF = CHSV(0, 0, brightness);
+    CHSV colR = CHSV(0, 255, brightness);
+    CHSV off = CHSV(0, 0, 0);
+
+    frontLeft(off, 0, _centralLeds);
+    frontRight(off, 0, _centralLeds);
+    rearLeft(off, 0, _centralLeds);
+    rearRight(off, 0, _centralLeds);
+
+    frontLeft(colF, _lights.flCnt - _centralLeds);
+    frontRight(colF, _lights.frCnt - _centralLeds);
+    rearLeft(colR, _lights.blCnt - _centralLeds);
+    rearRight(colR, _lights.brCnt - _centralLeds);
 }

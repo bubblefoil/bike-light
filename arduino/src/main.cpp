@@ -4,7 +4,7 @@
 #include "Light.h"
 
 #define PRINT_DEBUG 1
-#define PRINT_TRACE 1
+#define PRINT_TRACE 0
 
 #if PRINT_DEBUG
 #define PRINTS(s)       \
@@ -59,17 +59,25 @@ const uint8_t pinBatteryVoltage = A4;
 const float batteryVoltageDividerR1 = 10000000;
 const float batteryVoltageDividerR2 = 2000000;
 // Measure the actual voltage on the board's 5V pin
-const float boardReferenceVoltage = 5.0;
+const float boardReferenceVoltage = 4.995;
+// Voltages of battery states for charge indication.
+const float batteryVoltageFull = 14.0;
 const float batteryVoltageNominal = 12.0;
 const float batteryVoltageCritical = 9.0;
+const int N_LED_BATTERY_STATUS = 12;
+const byte BATTERY_STATUS_HUE = 108;
 
 // Size of battery voltage smoothing buffer
 float batteryVoltageSamples[BAT_SAMPLES];
 byte batteryVoltageReadingIndex = 0;
 
-// Default light mode. Set to OFF mainly for development with just USB power.
-const byte OFF = 0;
-byte lightMode = OFF;
+// The light mode which indecates battery status for a moment after being activated
+const byte BATTERY_CHARGE_INDICATOR_MODE = 3;
+// Time of the last light mode change. Used by battery indicator, which is active for a while after switching to BATTERY_CHARGE_INDICATOR_MODE
+unsigned long lastModeChangeTime = 0;
+
+// Currently selected light mode. Set to OFF by default mainly for development because if MCU is powered from USB only, strips would try to draw excessive power from it.
+byte lightMode = 0;
 
 // Millis until button press is interpreted as holding.
 const unsigned int holdThresholdTime = 300;
@@ -78,16 +86,16 @@ unsigned int lastHoldTime = 0;
 // Sign of the brightness increment. Flipped every time the button is held and released. Do not use byte, it is unsigned!
 int brightnessChangeDirection = 1;
 
-// Left blinker
+// Left blinker bit
 const byte LEFT = 1 << 0;
-// Right blinker
+// Right blinker bit
 const byte RIGHT = 1 << 1;
 // Blinker light hue in the range from 0 - red to 255 - red again. Orange should be 32 but it seemed too yellowish.
-const byte BLINKER_HUE = 24;
+const byte BLINKER_HUE = 22;
 // Blinker minimum light brightness in on the sides. Gradiently brighter towords center. Range 0 - 255, although below 30 the color looks horrible and below 25 it turns red.
 const byte BLINKER_DIM_BRIGHTNESS = 40;
 // Total duration of a single ON/OFF blink in milliseconds.
-const unsigned long BLINKER_INTERVAL = 1000L;
+const unsigned long BLINKER_INTERVAL = 800L;
 // Hazard warning lights gesture period in milliseconds. If a blinker is turned on 3-times withing this period, lights switch to Harard warning light mode.
 const unsigned long HAZARD_LIGHTS_GESTURE_TIME = 800L;
 // Last timestamps of turning on blinker. Used to detect 3 quick changes which actvate warning lights.
@@ -95,8 +103,8 @@ unsigned long blinkerTurnOnTimes[] = {-4 * HAZARD_LIGHTS_GESTURE_TIME, -2 * HAZA
 
 // Number of head/tail light LEDs. These shine at full brightness.
 const int N_FRONTAL = 6;
-// Number of turn signal LEDs
-const byte N_TURN_SIG = 12;
+// Number of head/tail light LEDs in power saving mode.
+const int N_PWR_SAVING = 10;
 
 // Memory for all LED colors
 // Front left LED colors
@@ -117,6 +125,7 @@ LightsOff lightsOff = LightsOff(lights);
 AdaptiveToAmbientLight adaptiveToAmbientLight = AdaptiveToAmbientLight(lights, pinPhotoResistor, N_FRONTAL);
 ManualBrightnessLight manualBrightnessLight = ManualBrightnessLight(lights, N_FRONTAL);
 ParkingLights parkingLights = ParkingLights(lights);
+PowerSavingLight powerSavingLight = PowerSavingLight(lights, 300, 200, N_PWR_SAVING);
 
 /** Array of pointers to the light modes. Cycled through when switching modes.
 * These have to be pointers, otherwise modes would be stored and used by value, but through a LightMode referece,
@@ -128,7 +137,7 @@ LightMode *lightModes[] = {
     &adaptiveToAmbientLight,
     &manualBrightnessLight,
     &parkingLights,
-};
+    &powerSavingLight};
 
 //Temporary variable to test brightness control.
 byte globalBrightness = 255;
@@ -149,7 +158,7 @@ void takeBatteryVoltageSample();
 float getSmoothedBatteryVoltage();
 // Fills buffer with voltage samples
 void initBatteryVoltageStatus();
-// Currently just writes battery voltage to Serial. Planned to use LEDs as indicator.
+// Shows battery voltage by LEDs
 void indicateBatteryVoltageStatus(float voltage);
 
 void handleBlinkers();
@@ -165,6 +174,7 @@ void frontalArea();
  */
 void nextLightMode()
 {
+  lastModeChangeTime = millis();
   lightMode++;
   lightMode %= (sizeof(lightModes) / sizeof(LightMode *));
   Serial.print("Light mode: ");
@@ -175,6 +185,7 @@ void nextLightMode()
 void nextLightModeHandler(Button &b)
 {
   nextLightMode();
+  PRINT("Battery: ", getSmoothedBatteryVoltage());
 }
 
 /**
@@ -185,9 +196,8 @@ void nextLightModeHandler(Button &b)
 void activateLightModeChangeHandler(Button &b)
 {
   brightnessChangeDirection *= -1;
-  Serial.print("*^ ");
-  Serial.println(brightnessChangeDirection);
   b.releaseHandler(nextLightModeHandler);
+  PRINT("*^ ", brightnessChangeDirection);
 }
 
 /**
@@ -311,15 +321,20 @@ void setup()
 */
 void loop()
 {
+  // Let Button library check button state
   buttonLightMode.process();
+  // Handle communication. Currently disabled until BT communication is figured out.
   // void processSerialInput();
+  // Sample batter voltage to keep track of running avarage.
   void takeBatteryVoltageSample();
 
-  //todo Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
+  // Handle long press of mode change and update raw brightness value of selected light mode.
+  // Note: Cannot use heldFor() because it checks whether hold event has already been fired. Use better timing here.
   unsigned int holdTime = buttonLightMode.holdTime();
   if (buttonLightMode.heldFor(holdThresholdTime) && holdTime > lastHoldTime)
   {
     lightModes[lightMode]->brightnessChange(holdTime - lastHoldTime, brightnessChangeDirection);
+    // Keep track of the time since the last change so we can send delta time and brightness can change at constant speed.
     lastHoldTime = holdTime;
   }
   else
@@ -327,8 +342,17 @@ void loop()
     lastHoldTime = holdThresholdTime;
   }
 
+  // Call the update lights method of selected mode implementation
   updateLights(false);
+  // If parking lights have been selected for less then certain period, signal battery charge level by LEDs.
+  if (lightMode == BATTERY_CHARGE_INDICATOR_MODE && millis() - lastModeChangeTime < 2000)
+  {
+    indicateBatteryVoltageStatus(getSmoothedBatteryVoltage());
+  }
+  // After lights set their colors, override them by blinker if needed.
   handleBlinkers();
+
+  // Send new values to LEDs and wait for the next time frame, using FastLED delay to enable time dithering if its ever used.
   FastLED.show();
   FastLED.delay(10);
 }
@@ -469,13 +493,44 @@ float getSmoothedBatteryVoltage()
   {
     total += batteryVoltageSamples[i];
   }
-  float voltage = total / (float) BAT_SAMPLES;
+  float voltage = total / (float)BAT_SAMPLES;
   return voltage;
 }
 
 void indicateBatteryVoltageStatus(float voltage)
 {
-  Serial.print("Battery:");
-  Serial.print(voltage);
-  Serial.println("V");
+  // Extra handling of discharged or fully charged battery. Otherwise, calculate anti-aliassed color bar.
+  if (voltage < batteryVoltageCritical)
+  {
+    fill_solid(&ledsFL[0], 1, CRGB::Red);
+    fill_solid(&ledsFR[0], 1, CRGB::Red);
+  }
+  else if (voltage >= batteryVoltageFull)
+  {
+    CHSV col = CHSV(BATTERY_STATUS_HUE, 255, 255);
+    fill_solid(&ledsFL[0], N_LED_BATTERY_STATUS, col);
+    fill_solid(&ledsFR[0], N_LED_BATTERY_STATUS, col);
+  }
+  else
+  {
+    // Charge percentage, 0.0 - 1.0
+    float percent = (batteryVoltageFull - batteryVoltageCritical) / voltage;
+    float ledsOnDec = percent * N_LED_BATTERY_STATUS;        // Number of indicator LEDs to light up with decimal part
+    float ledsFull = floor(ledsOnDec);                       // Number of LEDs to light up at full brightness as float
+    int ledsFullInt = (int)ledsFull;                         // Number of LEDs at 100% brightness as int
+    byte decimal = (byte)(255.0 * (ledsOnDec - ledsFull));   // The decimal part shown by a dimmer LED
+    CHSV colDimmer = CHSV(BATTERY_STATUS_HUE, 255, decimal); // Color of the dimmer LED at the On/Off boundary
+    CHSV col = CHSV(BATTERY_STATUS_HUE, 255, 255);           // Color of battery charge indicator LEDs
+    // Apply colors
+    fill_solid(&ledsFL[0], ledsFullInt, col);
+    fill_solid(&ledsFR[0], ledsFullInt, col);
+    ledsFL[ledsFullInt] = colDimmer;
+    ledsFR[ledsFullInt] = colDimmer;
+    // Turn off rest of the lights to show full length of the indicator bar
+    if (ledsFullInt < N_LED_BATTERY_STATUS)
+    {
+      fill_solid(&ledsFL[ledsFullInt + 1], N_LED_BATTERY_STATUS - ledsFullInt, CRGB::Black);
+      fill_solid(&ledsFR[ledsFullInt + 1], N_LED_BATTERY_STATUS - ledsFullInt, CRGB::Black);
+    }
+  }
 }

@@ -19,6 +19,7 @@
 #define AMBIENT_SIDE_BRIGHTNESS_MAX 127
 
 #define PRINT_DEBUG 1
+#define PRINT_TRACE 0
 
 #include <Arduino.h>
 #include <FastLED.h>
@@ -131,6 +132,24 @@ class ParkingLights : public LightMode
 public:
     ParkingLights(Lights &lights);
     ~ParkingLights();
+    virtual void updateLights();
+};
+
+
+/**
+ * Activates day/night light mode with brightness driven by an ambient light sensor.
+*/
+class PowerSavingLight : public LightMode
+{
+private:
+    unsigned int _blinkOnMillis;
+    unsigned int _blinkOffMillis;
+    int _centralLeds;
+    // Running time since the beginning
+    unsigned long time = 0;
+public:
+    PowerSavingLight(Lights &lights, unsigned int blinkOnMillis, unsigned int blinkOffMillis, int numberOfCentralLeds);
+    ~PowerSavingLight();
     virtual void updateLights();
 };
 
