@@ -64,13 +64,18 @@ const float boardReferenceVoltage = 4.995;
 const float batteryVoltageFull = 14.0;
 const float batteryVoltageNominal = 12.0;
 const float batteryVoltageCritical = 9.0;
+// How many LEDs will be used as a battery voltage bar
 const int N_LED_BATTERY_STATUS = 12;
-const byte BATTERY_STATUS_HUE = 108;
+// Color of the battery status bar
+const byte BATTERY_STATUS_HUE = 100;
 
 // Size of battery voltage smoothing buffer
 float batteryVoltageSamples[BAT_SAMPLES];
+// Pointer for the cycling buffer
 byte batteryVoltageReadingIndex = 0;
 
+// Index of the power saving light mode in which blinkers are dimmer
+const byte POWER_SAVING_MODE = 4;
 // The light mode which indecates battery status for a moment after being activated
 const byte BATTERY_CHARGE_INDICATOR_MODE = 3;
 // Time of the last light mode change. Used by battery indicator, which is active for a while after switching to BATTERY_CHARGE_INDICATOR_MODE
@@ -90,12 +95,15 @@ int brightnessChangeDirection = 1;
 const byte LEFT = 1 << 0;
 // Right blinker bit
 const byte RIGHT = 1 << 1;
+const byte BOTH_SIDES = LEFT | RIGHT;
 // Blinker light hue in the range from 0 - red to 255 - red again. Orange should be 32 but it seemed too yellowish.
 const byte BLINKER_HUE = 22;
-// Blinker minimum light brightness in on the sides. Gradiently brighter towords center. Range 0 - 255, although below 30 the color looks horrible and below 25 it turns red.
+// Blinker minimum brightness on the sides. Gradiently brighter towords center. Range 0 - 255, although below 30 the color looks horrible and below 25 it turns red.
 const byte BLINKER_DIM_BRIGHTNESS = 40;
-// Total duration of a single ON/OFF blink in milliseconds.
-const unsigned long BLINKER_INTERVAL = 800L;
+// Blinker brightness in power saving mode
+const byte BLINKER_BRIGHTNESS_PWR_SAVING = 80;
+// Total duration of a single ON/OFF blink in milliseconds. Set to a divisor of 2^15 (max int), because button timers keep hold time as ints so they overflow every 16s and the blinking would visibly change phase.
+const unsigned int BLINKER_INTERVAL = 1024;
 // Hazard warning lights gesture period in milliseconds. If a blinker is turned on 3-times withing this period, lights switch to Harard warning light mode.
 const unsigned long HAZARD_LIGHTS_GESTURE_TIME = 800L;
 // Last timestamps of turning on blinker. Used to detect 3 quick changes which actvate warning lights.
@@ -222,7 +230,7 @@ void printAmbientLightLevel()
   Serial.print("Light: ");
   Serial.print(analogRead(pinPhotoResistor));
   Serial.println(" / 1023");
-  indicateBatteryVoltageStatus(getSmoothedBatteryVoltage());
+  PRINT("Battery: ", getSmoothedBatteryVoltage());
 #endif
 }
 
@@ -361,7 +369,7 @@ void handleBlinkers()
 {
   // Check if hazard warning lights should be activated by gesture
   unsigned long lastGestureTime = blinkerTurnOnTimes[2] - blinkerTurnOnTimes[0];
-  byte hazard = (lastGestureTime <= HAZARD_LIGHTS_GESTURE_TIME) ? LEFT | RIGHT : 0;
+  byte hazard = (lastGestureTime <= HAZARD_LIGHTS_GESTURE_TIME) ? BOTH_SIDES : 0;
 
   if (buttonBlinkerLeft.isPressed())
   {
@@ -375,37 +383,54 @@ void handleBlinkers()
 }
 
 /**
- * Returns true if we are in the first half of the blinker interval,
- * measured since the blinker was switched on.
+ * Returns number of LEDs to turn on base on blinker interval.
  */
-bool getBlinkerLightState(unsigned int switchOnTime)
+byte getBlinkerAnimationState(unsigned int switchOnTime, byte sides)
 {
   // Less than half the blinker interval elapsed?
-  return (switchOnTime % BLINKER_INTERVAL < (BLINKER_INTERVAL / 2));
+  unsigned int t = switchOnTime % BLINKER_INTERVAL;
+  bool on = t < BLINKER_INTERVAL / 2;
+  if (!on)
+  {
+    return 0;
+  }
+  else if (sides == BOTH_SIDES)
+  {
+    return NUM_LEDS;
+  }
+  // Returns number of LEDs to turn on. BLINKER_INTERVAL / 2 means that all will be on just before off phase so it is set to full strip in the middle of the on phase.
+  return min(NUM_LEDS, map(t, 0, BLINKER_INTERVAL / 4, 0, NUM_LEDS));
+}
+
+void animateBlinker(struct CRGB *leds, int numLeds, const CRGB &col1, const CRGB &col2)
+{
+  if (numLeds)
+  {
+    // If anything is on, fill the strip with gradient
+    fill_gradient_RGB(leds, NUM_LEDS, col1, col1, col1, col2);
+  }
+  // Clear LEDs based on animation state
+  fill_solid(leds, NUM_LEDS - numLeds, CRGB::Black);
 }
 
 void blink(unsigned int blinkerOnTime, byte side)
 {
-  //Is the blinker light on or off at the moment?
-  bool blinkerState = getBlinkerLightState(blinkerOnTime);
+  // Calculate number of LEDs to light up for animation. For hazard light, disable animation. For second half of period, set to NUM_LEDS as well to set 0 brightness.
+  byte ledsOn = getBlinkerAnimationState(blinkerOnTime, side);
+  // This is probably here to give lights a chance to do what they need if no blinker LEDs are on at the moment.
 
-  if (!blinkerState)
-  {
-    updateLights(false);
-  }
-
-  byte brightness = blinkerState ? 255 : 0;
-  CHSV blinkerColorFull = CHSV(BLINKER_HUE, 255, brightness);
-  CHSV blinkerColorDim = CHSV(BLINKER_HUE, 255, brightness & BLINKER_DIM_BRIGHTNESS);
+  byte fullBrightness = lightMode == POWER_SAVING_MODE ? BLINKER_BRIGHTNESS_PWR_SAVING : 255;
+  CHSV blinkerColorFull = CHSV(BLINKER_HUE, 255, fullBrightness);
+  CHSV blinkerColorDim = CHSV(BLINKER_HUE, 255, BLINKER_DIM_BRIGHTNESS);
   if (side & RIGHT)
   {
-    fill_gradient_RGB(ledsFR, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
-    fill_gradient_RGB(ledsBR, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
+    animateBlinker(ledsFR, ledsOn, blinkerColorDim, blinkerColorFull);
+    animateBlinker(ledsBR, ledsOn, blinkerColorDim, blinkerColorFull);
   }
   if (side & LEFT)
   {
-    fill_gradient_RGB(ledsFL, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
-    fill_gradient_RGB(ledsBL, NUM_LEDS, blinkerColorDim, blinkerColorDim, blinkerColorDim, blinkerColorFull);
+    animateBlinker(ledsFL, ledsOn, blinkerColorDim, blinkerColorFull);
+    animateBlinker(ledsBL, ledsOn, blinkerColorDim, blinkerColorFull);
   }
 }
 

@@ -196,7 +196,7 @@ PowerSavingLight::~PowerSavingLight()
 void PowerSavingLight::updateLights()
 {
     unsigned long t = (millis() - time) % (_blinkOnMillis + _blinkOffMillis);
-    byte brightness = t >= _blinkOnMillis ? (byte)map(_rawBrightness, _minBrightness, _maxBrightness, 1, 31) : 0;
+    byte brightness = t >= _blinkOnMillis ? (byte)map(_rawBrightness, _minBrightness, _maxBrightness, 1, 127) : 0;
     CHSV colF = CHSV(0, 0, brightness);
     CHSV colR = CHSV(0, 255, brightness);
     CHSV off = CHSV(0, 0, 0);
